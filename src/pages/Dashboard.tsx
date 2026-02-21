@@ -45,19 +45,42 @@ export default function Dashboard() {
     i => i.discount_deadline && getDaysLeft(i.discount_deadline) > 0 && getDaysLeft(i.discount_deadline) <= 3
   );
 
-  const markAsPaid = async (invoice: Invoice) => {
-    if (!user) return;
+const markAsPaid = async (invoice: Invoice) => {
+    if (!user || !profile) return;
+
     const discountCaptured = invoice.discount_deadline && getDaysLeft(invoice.discount_deadline) > 0
       ? invoice.amount * (invoice.discount_pct || 0) / 100 : 0;
     const amountPaid = invoice.amount - discountCaptured;
 
-    await supabase.from('payments').insert({
-      user_id: user.id, invoice_id: invoice.id,
-      amount_paid: amountPaid, discount_captured: discountCaptured,
+    if (profile.cash_balance < amountPaid) {
+      toast.error(`Insufficient balance. You have ${formatINR(profile.cash_balance)} but need ${formatINR(amountPaid)}.`);
+      return;
+    }
+
+    const { error: paymentError } = await supabase.from('payments').insert({
+      user_id: user.id,
+      invoice_id: invoice.id,
+      amount_paid: amountPaid,
+      discount_captured: discountCaptured,
     });
+
+    if (paymentError) {
+      toast.error('Failed to record payment. Please try again.');
+      return;
+    }
+
     await supabase.from('invoices').update({ status: 'PAID' as const }).eq('id', invoice.id);
-    toast.success(`Payment recorded: ${formatINR(amountPaid)}${discountCaptured > 0 ? ` (saved ${formatINR(discountCaptured)})` : ''}`);
-    fetchInvoices();
+
+    const newBalance = profile.cash_balance - amountPaid;
+    await supabase.from('profiles').update({ cash_balance: newBalance }).eq('user_id', user.id);
+
+    await refreshProfile();
+    await fetchInvoices();
+
+    toast.success(
+      `Payment of ${formatINR(amountPaid)} recorded.` +
+      (discountCaptured > 0 ? ` You saved ${formatINR(discountCaptured)}! 🎉` : '')
+    );
   };
 
   const loadDemoData = async () => {
