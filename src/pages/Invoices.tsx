@@ -125,10 +125,9 @@ export default function Invoices() {
   if (loading) return <div className="space-y-4"><Skeleton className="h-8 w-48" /><Skeleton className="h-64" /></div>;
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="sticky top-0 z-10 bg-background border-b border-border pb-4 mb-4">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-heading font-bold">Invoices</h1>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-heading font-bold">Invoices</h1>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2" />Add Invoice</Button></DialogTrigger>
           <DialogContent className="bg-card max-w-md">
@@ -185,10 +184,9 @@ export default function Invoices() {
           </DialogContent>
         </Dialog>
       </div>
-      </div>
 
-      <div className="flex-1 overflow-y-auto">
-      <div className="space-y-4">
+      <div className="overflow-y-auto max-h-[calc(100vh-200px)]">
+      <div className="space-y-4 p-4">
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="bg-muted">
           <TabsTrigger value="all">All</TabsTrigger>
