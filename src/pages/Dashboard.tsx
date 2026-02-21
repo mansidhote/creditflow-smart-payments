@@ -1,123 +1,326 @@
-import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/hooks/useAuth';
-import { formatINR, getDaysLeft, getDaysLeftColor, getDaysLeftLabel, calcEAC } from '@/lib/creditTerms';
-import KPICard from '@/components/KPICard';
-import StatusBadge from '@/components/StatusBadge';
-import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
-import { toast } from 'sonner';
-import { AlertTriangle, IndianRupee, Clock, TrendingDown, Sparkles, Loader2 } from 'lucide-react';
-import type { Tables } from '@/integrations/supabase/types';
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import {
+  formatINR,
+  getDaysLeft,
+  getDaysLeftColor,
+  getDaysLeftLabel,
+  calcEAC,
+} from "@/lib/creditTerms";
+import KPICard from "@/components/KPICard";
+import StatusBadge from "@/components/StatusBadge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "sonner";
+import {
+  AlertTriangle,
+  IndianRupee,
+  Clock,
+  TrendingDown,
+  Sparkles,
+  Loader2,
+} from "lucide-react";
+import type { Tables } from "@/integrations/supabase/types";
 
-type Invoice = Tables<'invoices'> & { suppliers: { name: string } | null };
+type Invoice = Tables<"invoices"> & {
+  suppliers: { name: string } | null;
+  snoozed_until: string | null;
+};
 
 export default function Dashboard() {
   const { user, profile, refreshProfile } = useAuth();
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [visibleInvoices, setVisibleInvoices] = useState<Invoice[]>([]);
+  const [allInvoices, setAllInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
+
   const [seeding, setSeeding] = useState(false);
 
   const fetchInvoices = async () => {
     if (!user) return;
-    const { data } = await supabase
-      .from('invoices')
-      .select('*, suppliers(name)')
-      .eq('user_id', user.id)
-      .neq('status', 'PAID')
-      .order('due_date', { ascending: true });
-    setInvoices((data as Invoice[]) || []);
-    setLoading(false);
+
+    const today = new Date().toISOString().split("T")[0];
+
+    const { data, error } = await supabase
+      .from("invoices")
+      .select("*, suppliers(name)")
+      .eq("user_id", user.id)
+      .neq("status", "PAID")
+      .or(`snoozed_until.is.null,snoozed_until.lt.${today}`)
+      .order("due_date", { ascending: true });
+
+    if (error) {
+      console.error("Fetch invoices error:", error);
+      return;
+    }
+
+    // Apply the due_date <= snoozed_until filter in JS
+    const filteredData = (data as Invoice[]).filter(
+      (i) =>
+        !i.snoozed_until ||
+        i.snoozed_until < today ||
+        i.due_date <= i.snoozed_until,
+    );
+
+    setVisibleInvoices(filteredData);
   };
 
-  useEffect(() => { fetchInvoices(); }, [user]);
+  const fetchAllInvoices = async () => {
+    if (!user) return;
 
-  const totalOutstanding = invoices.reduce((s, i) => s + i.amount, 0);
-  const urgentPayments = invoices.filter(i => getDaysLeft(i.due_date) <= 3);
-  const savingsAvailable = invoices
-    .filter(i => i.discount_deadline && getDaysLeft(i.discount_deadline) > 0)
-    .reduce((s, i) => s + (i.amount * (i.discount_pct || 0) / 100), 0);
-  const missedSavings = invoices
-    .filter(i => i.discount_deadline && getDaysLeft(i.discount_deadline) <= 0 && i.status !== 'PAID')
-    .reduce((s, i) => s + (i.amount * (i.discount_pct || 0) / 100), 0);
+    const { data, error } = await supabase
+      .from("invoices")
+      .select("*, suppliers(name)")
+      .eq("user_id", user.id)
+      .neq("status", "PAID")
+      .order("due_date", { ascending: true });
 
-  const discountAlerts = invoices.filter(
-    i => i.discount_deadline && getDaysLeft(i.discount_deadline) > 0 && getDaysLeft(i.discount_deadline) <= 3
+    if (error) {
+      console.error("Fetch all invoices error:", error);
+      return;
+    }
+
+    setAllInvoices(data as Invoice[]);
+  };
+
+  useEffect(() => {
+    if (!user) return;
+
+    const load = async () => {
+      setLoading(true);
+      await Promise.all([fetchInvoices(), fetchAllInvoices()]);
+      setLoading(false);
+    };
+
+    load();
+  }, [user]);
+
+  const totalOutstanding = allInvoices.reduce((s, i) => s + i.amount, 0);
+  const urgentPayments = allInvoices.filter(
+    (i) => getDaysLeft(i.due_date) <= 3,
+  );
+  const savingsAvailable = allInvoices
+    .filter((i) => i.discount_deadline && getDaysLeft(i.discount_deadline) > 0)
+    .reduce((s, i) => s + (i.amount * (i.discount_pct || 0)) / 100, 0);
+  const missedSavings = allInvoices
+    .filter(
+      (i) =>
+        i.discount_deadline &&
+        getDaysLeft(i.discount_deadline) <= 0 &&
+        i.status !== "PAID",
+    )
+    .reduce((s, i) => s + (i.amount * (i.discount_pct || 0)) / 100, 0);
+
+  const discountAlerts = allInvoices.filter(
+    (i) =>
+      i.discount_deadline &&
+      getDaysLeft(i.discount_deadline) > 0 &&
+      getDaysLeft(i.discount_deadline) <= 3,
   );
 
   const markAsPaid = async (invoice: Invoice) => {
     if (!user) return;
-    const discountCaptured = invoice.discount_deadline && getDaysLeft(invoice.discount_deadline) > 0
-      ? invoice.amount * (invoice.discount_pct || 0) / 100 : 0;
+
+    const discountCaptured =
+      invoice.discount_deadline && getDaysLeft(invoice.discount_deadline) > 0
+        ? (invoice.amount * (invoice.discount_pct || 0)) / 100
+        : 0;
     const amountPaid = invoice.amount - discountCaptured;
 
-    await supabase.from('payments').insert({
-      user_id: user.id, invoice_id: invoice.id,
-      amount_paid: amountPaid, discount_captured: discountCaptured,
-    });
-    await supabase.from('invoices').update({ status: 'PAID' as const }).eq('id', invoice.id);
-    toast.success(`Payment recorded: ${formatINR(amountPaid)}${discountCaptured > 0 ? ` (saved ${formatINR(discountCaptured)})` : ''}`);
-    fetchInvoices();
+    // ← Replace your old insert with this
+    const { data: paymentData, error } = await supabase
+      .from("payments")
+      .insert({
+        user_id: user.id,
+        invoice_id: invoice.id,
+        amount_paid: amountPaid,
+        discount_captured: discountCaptured,
+      });
+
+    if (error) {
+      console.error("Payment insert error:", error);
+      toast.error("Failed to record payment");
+      return;
+    }
+
+    console.log("Payment inserted:", paymentData);
+
+    // Now mark the invoice as PAID
+    await supabase
+      .from("invoices")
+      .update({ status: "PAID" as const })
+      .eq("id", invoice.id);
+
+    toast.success(
+      `Payment recorded: ${formatINR(amountPaid)}${
+        discountCaptured > 0 ? ` (saved ${formatINR(discountCaptured)})` : ""
+      }`,
+    );
+
+    await Promise.all([fetchInvoices(), fetchAllInvoices(), refreshProfile()]);
+  };
+
+  const snoozeInvoice = async (invoice: Invoice) => {
+    if (!user) return;
+
+    const snoozeUntil = new Date();
+    snoozeUntil.setDate(snoozeUntil.getDate() + 3);
+
+    await supabase
+      .from("invoices")
+      .update({ snoozed_until: snoozeUntil.toISOString().split("T")[0] })
+      .eq("id", invoice.id);
+
+    toast.success("Invoice snoozed for 3 days");
+    await Promise.all([fetchInvoices(), fetchAllInvoices(), refreshProfile()]);
   };
 
   const loadDemoData = async () => {
     if (!user) return;
     setSeeding(true);
     const suppliers = [
-      { name: 'Mehta Packaging Solutions', category: 'Packaging' as const },
-      { name: 'Sharma Raw Materials Ltd', category: 'Raw Materials' as const },
-      { name: 'TechVision Electronics', category: 'Electronics' as const },
-      { name: 'Patel Textiles & Fabrics', category: 'Textiles' as const },
-      { name: 'GreenChem Industries', category: 'Chemicals' as const },
-      { name: 'Agri Fresh Traders', category: 'Food & Agri' as const },
+      { name: "Mehta Packaging Solutions", category: "Packaging" as const },
+      { name: "Sharma Raw Materials Ltd", category: "Raw Materials" as const },
+      { name: "TechVision Electronics", category: "Electronics" as const },
+      { name: "Patel Textiles & Fabrics", category: "Textiles" as const },
+      { name: "GreenChem Industries", category: "Chemicals" as const },
+      { name: "Agri Fresh Traders", category: "Food & Agri" as const },
     ];
 
-    const { data: suppliersData } = await supabase.from('suppliers').insert(
-      suppliers.map(s => ({ ...s, user_id: user.id, contact_phone: '+91 98765 43210', contact_email: `info@${s.name.split(' ')[0].toLowerCase()}.in` }))
-    ).select();
+    const { data: suppliersData } = await supabase
+      .from("suppliers")
+      .insert(
+        suppliers.map((s) => ({
+          ...s,
+          user_id: user.id,
+          contact_phone: "+91 98765 43210",
+          contact_email: `info@${s.name.split(" ")[0].toLowerCase()}.in`,
+        })),
+      )
+      .select();
 
-    if (!suppliersData) { setSeeding(false); return; }
+    if (!suppliersData) {
+      setSeeding(false);
+      return;
+    }
 
     const today = new Date();
     const d = (offset: number) => {
       const date = new Date(today);
       date.setDate(date.getDate() + offset);
-      return date.toISOString().split('T')[0];
+      return date.toISOString().split("T")[0];
     };
 
     const invoiceData = [
-      { supplier_id: suppliersData[0].id, amount: 32000, terms: '2/10 Net 30', invoice_date: d(-25), due_date: d(-25 + 30), discount_deadline: d(-25 + 10), discount_pct: 2, discount_days: 10, status: 'OVERDUE' as const },
-      { supplier_id: suppliersData[1].id, amount: 85000, terms: 'Net 30', invoice_date: d(-20), due_date: d(-20 + 30), status: 'DUE_SOON' as const },
-      { supplier_id: suppliersData[2].id, amount: 150000, terms: '3/10 Net 30', invoice_date: d(-5), due_date: d(-5 + 30), discount_deadline: d(-5 + 10), discount_pct: 3, discount_days: 10, status: 'ACTIVE' as const },
-      { supplier_id: suppliersData[3].id, amount: 45000, terms: 'Net 45', invoice_date: d(-10), due_date: d(-10 + 45), status: 'ACTIVE' as const },
-      { supplier_id: suppliersData[4].id, amount: 220000, terms: '2/10 Net 45', invoice_date: d(-3), due_date: d(-3 + 45), discount_deadline: d(-3 + 10), discount_pct: 2, discount_days: 10, status: 'ACTIVE' as const },
-      { supplier_id: suppliersData[5].id, amount: 68000, terms: 'Net 60', invoice_date: d(-15), due_date: d(-15 + 60), status: 'ACTIVE' as const },
-      { supplier_id: suppliersData[0].id, amount: 18000, terms: 'Net 30', invoice_date: d(-28), due_date: d(-28 + 30), status: 'DUE_SOON' as const },
-      { supplier_id: suppliersData[1].id, amount: 95000, terms: '3/15 Net 45', invoice_date: d(-2), due_date: d(-2 + 45), discount_deadline: d(-2 + 15), discount_pct: 3, discount_days: 15, status: 'ACTIVE' as const },
+      {
+        supplier_id: suppliersData[0].id,
+        amount: 32000,
+        terms: "2/10 Net 30",
+        invoice_date: d(-25),
+        due_date: d(-25 + 30),
+        discount_deadline: d(-25 + 10),
+        discount_pct: 2,
+        discount_days: 10,
+        status: "OVERDUE" as const,
+      },
+      {
+        supplier_id: suppliersData[1].id,
+        amount: 85000,
+        terms: "Net 30",
+        invoice_date: d(-20),
+        due_date: d(-20 + 30),
+        status: "DUE_SOON" as const,
+      },
+      {
+        supplier_id: suppliersData[2].id,
+        amount: 150000,
+        terms: "3/10 Net 30",
+        invoice_date: d(-5),
+        due_date: d(-5 + 30),
+        discount_deadline: d(-5 + 10),
+        discount_pct: 3,
+        discount_days: 10,
+        status: "ACTIVE" as const,
+      },
+      {
+        supplier_id: suppliersData[3].id,
+        amount: 45000,
+        terms: "Net 45",
+        invoice_date: d(-10),
+        due_date: d(-10 + 45),
+        status: "ACTIVE" as const,
+      },
+      {
+        supplier_id: suppliersData[4].id,
+        amount: 220000,
+        terms: "2/10 Net 45",
+        invoice_date: d(-3),
+        due_date: d(-3 + 45),
+        discount_deadline: d(-3 + 10),
+        discount_pct: 2,
+        discount_days: 10,
+        status: "ACTIVE" as const,
+      },
+      {
+        supplier_id: suppliersData[5].id,
+        amount: 68000,
+        terms: "Net 60",
+        invoice_date: d(-15),
+        due_date: d(-15 + 60),
+        status: "ACTIVE" as const,
+      },
+      {
+        supplier_id: suppliersData[0].id,
+        amount: 18000,
+        terms: "Net 30",
+        invoice_date: d(-28),
+        due_date: d(-28 + 30),
+        status: "DUE_SOON" as const,
+      },
+      {
+        supplier_id: suppliersData[1].id,
+        amount: 95000,
+        terms: "3/15 Net 45",
+        invoice_date: d(-2),
+        due_date: d(-2 + 45),
+        discount_deadline: d(-2 + 15),
+        discount_pct: 3,
+        discount_days: 15,
+        status: "ACTIVE" as const,
+      },
     ];
 
-    await supabase.from('invoices').insert(invoiceData.map(i => ({ ...i, user_id: user.id })));
-    await supabase.from('profiles').update({ cash_balance: 150000 }).eq('user_id', user.id);
-    await refreshProfile();
-    await fetchInvoices();
+    await supabase
+      .from("invoices")
+      .insert(invoiceData.map((i) => ({ ...i, user_id: user.id })));
+    await supabase
+      .from("profiles")
+      .update({ cash_balance: 150000 })
+      .eq("user_id", user.id);
+    await Promise.all([refreshProfile(), fetchInvoices(), fetchAllInvoices()]);
     setSeeding(false);
-    toast.success('Demo data loaded successfully!');
+    toast.success("Demo data loaded successfully!");
   };
 
   // Check if user has suppliers
   const [hasSuppliers, setHasSuppliers] = useState<boolean | null>(null);
   useEffect(() => {
     if (!user) return;
-    supabase.from('suppliers').select('id', { count: 'exact', head: true }).eq('user_id', user.id)
+    supabase
+      .from("suppliers")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
       .then(({ count }) => setHasSuppliers((count || 0) > 0));
-  }, [user, invoices]);
+  }, [user, allInvoices]);
 
   if (loading) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-8 w-48" />
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28" />)}
+          {[...Array(4)].map((_, i) => (
+            <Skeleton key={i} className="h-28" />
+          ))}
         </div>
         <Skeleton className="h-64" />
       </div>
@@ -130,13 +333,16 @@ export default function Dashboard() {
         <div>
           <h1 className="text-2xl font-heading font-bold">Dashboard</h1>
           <p className="text-sm text-muted-foreground">
-            Welcome back, {profile?.full_name || 'User'} — {profile?.business_name}
+            Welcome back, {profile?.full_name || "User"} —{" "}
+            {profile?.business_name}
           </p>
         </div>
         {profile && (
           <div className="text-right">
             <p className="text-xs text-muted-foreground">Cash Balance</p>
-            <p className="text-lg font-mono font-bold text-primary">{formatINR(profile.cash_balance)}</p>
+            <p className="text-lg font-mono font-bold text-primary">
+              {formatINR(profile.cash_balance)}
+            </p>
           </div>
         )}
       </div>
@@ -144,10 +350,21 @@ export default function Dashboard() {
       {hasSuppliers === false && (
         <div className="bg-card border border-primary/20 rounded-lg p-6 text-center">
           <Sparkles className="h-10 w-10 text-primary mx-auto mb-3" />
-          <h3 className="font-heading font-bold text-lg mb-1">Get Started with Demo Data</h3>
-          <p className="text-sm text-muted-foreground mb-4">Load sample suppliers and invoices to explore CreditFlow</p>
+          <h3 className="font-heading font-bold text-lg mb-1">
+            Get Started with Demo Data
+          </h3>
+          <p className="text-sm text-muted-foreground mb-4">
+            Load sample suppliers and invoices to explore CreditFlow
+          </p>
           <Button onClick={loadDemoData} disabled={seeding}>
-            {seeding ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Loading...</> : 'Load Demo Data'}
+            {seeding ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Loading...
+              </>
+            ) : (
+              "Load Demo Data"
+            )}
           </Button>
         </div>
       )}
@@ -158,10 +375,17 @@ export default function Dashboard() {
           <AlertTriangle className="h-5 w-5 text-warning flex-shrink-0" />
           <div>
             <p className="text-sm font-medium text-warning">
-              {discountAlerts.length} discount deadline{discountAlerts.length > 1 ? 's' : ''} expiring within 3 days!
+              {discountAlerts.length} discount deadline
+              {discountAlerts.length > 1 ? "s" : ""} expiring within 3 days!
             </p>
             <p className="text-xs text-muted-foreground">
-              Potential savings: {formatINR(discountAlerts.reduce((s, i) => s + (i.amount * (i.discount_pct || 0) / 100), 0))}
+              Potential savings:{" "}
+              {formatINR(
+                discountAlerts.reduce(
+                  (s, i) => s + (i.amount * (i.discount_pct || 0)) / 100,
+                  0,
+                ),
+              )}
             </p>
           </div>
         </div>
@@ -169,10 +393,32 @@ export default function Dashboard() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard title="Total Outstanding" value={formatINR(totalOutstanding)} icon={<IndianRupee className="h-5 w-5" />} />
-        <KPICard title="Urgent Payments" value={String(urgentPayments.length)} subtitle="Due within 3 days" icon={<Clock className="h-5 w-5" />} variant="critical" />
-        <KPICard title="Savings Available" value={formatINR(savingsAvailable)} subtitle="Live discount windows" icon={<TrendingDown className="h-5 w-5" />} variant="success" />
-        <KPICard title="Missed Savings" value={formatINR(missedSavings)} subtitle="Expired discounts" icon={<AlertTriangle className="h-5 w-5" />} variant="warning" />
+        <KPICard
+          title="Total Outstanding"
+          value={formatINR(totalOutstanding)}
+          icon={<IndianRupee className="h-5 w-5" />}
+        />
+        <KPICard
+          title="Urgent Payments"
+          value={String(urgentPayments.length)}
+          subtitle="Due within 3 days"
+          icon={<Clock className="h-5 w-5" />}
+          variant="critical"
+        />
+        <KPICard
+          title="Savings Available"
+          value={formatINR(savingsAvailable)}
+          subtitle="Live discount windows"
+          icon={<TrendingDown className="h-5 w-5" />}
+          variant="success"
+        />
+        <KPICard
+          title="Missed Savings"
+          value={formatINR(missedSavings)}
+          subtitle="Expired discounts"
+          icon={<AlertTriangle className="h-5 w-5" />}
+          variant="warning"
+        />
       </div>
 
       {/* AI Insights */}
@@ -184,7 +430,10 @@ export default function Dashboard() {
               <p className="text-xs font-medium text-critical">URGENT</p>
             </div>
             <p className="text-sm">
-              {urgentPayments.length} payment{urgentPayments.length > 1 ? 's' : ''} due within 3 days totaling {formatINR(urgentPayments.reduce((s, i) => s + i.amount, 0))}. Prioritize these to avoid penalties.
+              {urgentPayments.length} payment
+              {urgentPayments.length > 1 ? "s" : ""} due within 3 days totaling{" "}
+              {formatINR(urgentPayments.reduce((s, i) => s + i.amount, 0))}.
+              Prioritize these to avoid penalties.
             </p>
           </div>
         )}
@@ -195,18 +444,21 @@ export default function Dashboard() {
               <p className="text-xs font-medium text-success">OPPORTUNITY</p>
             </div>
             <p className="text-sm">
-              Pay early to capture {formatINR(savingsAvailable)} in discounts. The annualized return makes this a strong cash deployment.
+              Pay early to capture {formatINR(savingsAvailable)} in discounts.
+              The annualized return makes this a strong cash deployment.
             </p>
           </div>
         )}
-        {invoices.some(i => getDaysLeft(i.due_date) > 30) && (
+        {allInvoices.some((i) => getDaysLeft(i.due_date) > 30) && (
           <div className="bg-card border border-info/20 rounded-lg p-4">
             <div className="flex items-center gap-2 mb-2">
               <div className="w-2 h-2 rounded-full bg-info" />
               <p className="text-xs font-medium text-info">DEFERRAL</p>
             </div>
             <p className="text-sm">
-              {invoices.filter(i => getDaysLeft(i.due_date) > 30).length} invoices have 30+ days remaining. Defer payments to preserve working capital.
+              {allInvoices.filter((i) => getDaysLeft(i.due_date) > 30).length}{" "}
+              invoices have 30+ days remaining. Defer payments to preserve
+              working capital.
             </p>
           </div>
         )}
@@ -217,9 +469,11 @@ export default function Dashboard() {
         <div className="p-4 border-b border-border">
           <h3 className="font-heading font-bold">Supplier Payments</h3>
         </div>
-        {invoices.length === 0 ? (
+        {visibleInvoices.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground">
-            <p>No active invoices. Add suppliers and invoices to get started.</p>
+            <p>
+              No active invoices. Add suppliers and invoices to get started.
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -235,25 +489,50 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {invoices.map(inv => {
+                {visibleInvoices.map((inv) => {
                   const days = getDaysLeft(inv.due_date);
                   return (
-                    <tr key={inv.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
-                      <td className="p-3 text-sm">{inv.suppliers?.name || 'Unknown'}</td>
-                      <td className="p-3 text-sm text-right font-mono">{formatINR(inv.amount)}</td>
-                      <td className="p-3"><StatusBadge status={inv.terms} /></td>
-                      <td className="p-3 text-sm font-mono">{new Date(inv.due_date).toLocaleDateString('en-IN')}</td>
-                      <td className={`p-3 text-sm text-right font-mono font-medium ${getDaysLeftColor(days)}`}>
+                    <tr
+                      key={inv.id}
+                      className="border-b border-border/50 hover:bg-muted/30 transition-colors"
+                    >
+                      <td className="p-3 text-sm">
+                        {inv.suppliers?.name || "Unknown"}
+                      </td>
+                      <td className="p-3 text-sm text-right font-mono">
+                        {formatINR(inv.amount)}
+                      </td>
+                      <td className="p-3">
+                        <StatusBadge status={inv.terms} />
+                      </td>
+                      <td className="p-3 text-sm font-mono">
+                        {new Date(inv.due_date).toLocaleDateString("en-IN")}
+                      </td>
+                      <td
+                        className={`p-3 text-sm text-right font-mono font-medium ${getDaysLeftColor(days)}`}
+                      >
                         {getDaysLeftLabel(days)}
                       </td>
                       <td className="p-3 text-right">
-                        <Button
-                          size="sm"
-                          variant={days <= 3 ? 'default' : days <= 7 ? 'secondary' : 'ghost'}
-                          onClick={() => markAsPaid(inv)}
-                        >
-                          {days <= 3 ? 'Pay Now' : days <= 7 ? 'Schedule' : 'Hold'}
-                        </Button>
+                        <div className="flex justify-end gap-2">
+                          {getDaysLeft(inv.due_date) <= 3 ? (
+                            <Button
+                              size="sm"
+                              variant="default"
+                              onClick={() => markAsPaid(inv)}
+                            >
+                              Pay Now
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => snoozeInvoice(inv)}
+                            >
+                              Snooze
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
