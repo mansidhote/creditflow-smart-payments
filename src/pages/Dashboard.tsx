@@ -1,27 +1,14 @@
-import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/useAuth";
-import {
-  formatINR,
-  getDaysLeft,
-  getDaysLeftColor,
-  getDaysLeftLabel,
-  calcEAC,
-} from "@/lib/creditTerms";
-import KPICard from "@/components/KPICard";
-import StatusBadge from "@/components/StatusBadge";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { toast } from "sonner";
-import {
-  AlertTriangle,
-  IndianRupee,
-  Clock,
-  TrendingDown,
-  Sparkles,
-  Loader2,
-} from "lucide-react";
-import type { Tables } from "@/integrations/supabase/types";
+import { useEffect, useState } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/hooks/useAuth';
+import { formatINR, getDaysLeft, getDaysLeftColor, getDaysLeftLabel, calcEAC } from '@/lib/creditTerms';
+import KPICard from '@/components/KPICard';
+import StatusBadge from '@/components/StatusBadge';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { toast } from 'sonner';
+import { AlertTriangle, IndianRupee, Clock, TrendingDown, Sparkles, Loader2, Zap } from 'lucide-react';
+import type { Tables } from '@/integrations/supabase/types';
 
 type Invoice = Tables<"invoices"> & {
   suppliers: { name: string } | null;
@@ -96,6 +83,18 @@ export default function Dashboard() {
   }, [user]);
 
   const totalOutstanding = allInvoices.reduce((s, i) => s + i.amount, 0);
+  const totalPenalties = allInvoices.reduce((s, i) => {
+    const days = getDaysLeft(i.due_date);
+    if (days < 0 && (i.penalty_rate || 0) > 0) {
+      const overdue = Math.abs(days);
+      if (i.penalty_type === 'monthly') {
+        const months = Math.ceil(overdue / 30);
+        return s + (i.amount * (i.penalty_rate || 0) / 100 * months);
+      }
+      return s + (i.amount * (i.penalty_rate || 0) / 100 * overdue);
+    }
+    return s;
+  }, 0);
   const urgentPayments = allInvoices.filter(
     (i) => getDaysLeft(i.due_date) <= 3,
   );
@@ -125,7 +124,19 @@ export default function Dashboard() {
       invoice.discount_deadline && getDaysLeft(invoice.discount_deadline) > 0
         ? (invoice.amount * (invoice.discount_pct || 0)) / 100
         : 0;
-    const amountPaid = invoice.amount - discountCaptured;
+    // include penalty when paying from dashboard
+    const daysLeft = getDaysLeft(invoice.due_date);
+    let penaltyAmount = 0;
+    if (daysLeft < 0 && (invoice.penalty_rate || 0) > 0) {
+      const overdue = Math.abs(daysLeft);
+      if (invoice.penalty_type === 'monthly') {
+        const months = Math.ceil(overdue / 30);
+        penaltyAmount = invoice.amount * (invoice.penalty_rate || 0) / 100 * months;
+      } else {
+        penaltyAmount = invoice.amount * (invoice.penalty_rate || 0) / 100 * overdue;
+      }
+    }
+    const amountPaid = invoice.amount - discountCaptured + penaltyAmount;
 
     // ← Replace your old insert with this
     const { data: paymentData, error } = await supabase
@@ -152,8 +163,8 @@ export default function Dashboard() {
       .eq("id", invoice.id);
 
     toast.success(
-      `Payment recorded: ${formatINR(amountPaid)}${
-        discountCaptured > 0 ? ` (saved ${formatINR(discountCaptured)})` : ""
+      `Payment recorded: ${formatINR(Math.round(amountPaid))}${
+        discountCaptured > 0 ? ` (saved ${formatINR(Math.round(discountCaptured))})` : ''}${penaltyAmount > 0 ? ` (including penalty ${formatINR(Math.round(penaltyAmount))})` : ""
       }`,
     );
 
@@ -419,6 +430,7 @@ export default function Dashboard() {
           icon={<AlertTriangle className="h-5 w-5" />}
           variant="warning"
         />
+        <KPICard title="Estimated Penalties" value={formatINR(totalPenalties)} subtitle="Overdue penalties" icon={<Zap className="h-5 w-5" />} variant="warning" />
       </div>
 
       {/* AI Insights */}
@@ -484,6 +496,7 @@ export default function Dashboard() {
                   <th className="text-right p-3">Amount</th>
                   <th className="text-left p-3">Terms</th>
                   <th className="text-left p-3">Due Date</th>
+                  <th className="text-right p-3">Penalty</th>
                   <th className="text-right p-3">Days Left</th>
                   <th className="text-right p-3">Action</th>
                 </tr>
@@ -508,6 +521,25 @@ export default function Dashboard() {
                       <td className="p-3 text-sm font-mono">
                         {new Date(inv.due_date).toLocaleDateString("en-IN")}
                       </td>
+                      {/* penalty column */}
+                      {(() => {
+                        const daysLocal = getDaysLeft(inv.due_date);
+                        let penalty = 0;
+                        if (daysLocal < 0 && (inv.penalty_rate || 0) > 0) {
+                          const overdue = Math.abs(daysLocal);
+                          if (inv.penalty_type === 'monthly') {
+                            const months = Math.ceil(overdue / 30);
+                            penalty = inv.amount * (inv.penalty_rate || 0) / 100 * months;
+                          } else {
+                            penalty = inv.amount * (inv.penalty_rate || 0) / 100 * overdue;
+                          }
+                        }
+                        return (
+                          <td className={`p-3 text-sm text-right font-mono ${penalty > 0 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                            {penalty > 0 ? formatINR(Math.round(penalty)) : '—'}
+                          </td>
+                        );
+                      })()}
                       <td
                         className={`p-3 text-sm text-right font-mono font-medium ${getDaysLeftColor(days)}`}
                       >

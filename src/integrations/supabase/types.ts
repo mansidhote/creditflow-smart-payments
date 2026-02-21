@@ -55,6 +55,8 @@ export type Database = {
       invoices: {
         Row: {
           amount: number
+          penalty_rate: number
+          penalty_type: string
           created_at: string
           discount_days: number | null
           discount_deadline: string | null
@@ -70,6 +72,8 @@ export type Database = {
         }
         Insert: {
           amount: number
+          penalty_rate?: number
+          penalty_type?: string
           created_at?: string
           discount_days?: number | null
           discount_deadline?: string | null
@@ -85,6 +89,8 @@ export type Database = {
         }
         Update: {
           amount?: number
+          penalty_rate?: number
+          penalty_type?: string
           created_at?: string
           discount_days?: number | null
           discount_deadline?: string | null
