@@ -130,7 +130,7 @@ export default function Invoices() {
         <h1 className="text-2xl font-heading font-bold">Invoices</h1>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2" />Add Invoice</Button></DialogTrigger>
-          <DialogContent className="bg-card max-w-md">
+          <DialogContent className="bg-card max-w-md max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle className="font-heading">New Invoice</DialogTitle></DialogHeader>
             <div className="space-y-4 mt-2">
               <div className="space-y-2">
@@ -185,8 +185,6 @@ export default function Invoices() {
         </Dialog>
       </div>
 
-      <div className="overflow-y-auto max-h-[calc(100vh-200px)]">
-      <div className="space-y-4 p-4">
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="bg-muted">
           <TabsTrigger value="all">All</TabsTrigger>
@@ -267,8 +265,6 @@ export default function Invoices() {
           })}
         </div>
       )}
-      </div>
-      </div>
     </div>
   );
 }
