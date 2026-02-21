@@ -7,7 +7,7 @@ import StatusBadge from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import { AlertTriangle, IndianRupee, Clock, TrendingDown, Sparkles, Loader2 } from 'lucide-react';
+import { AlertTriangle, IndianRupee, Clock, TrendingDown, Sparkles, Loader2, Zap } from 'lucide-react';
 import type { Tables } from '@/integrations/supabase/types';
 
 type Invoice = Tables<'invoices'> & { suppliers: { name: string } | null };
@@ -197,7 +197,7 @@ export default function Dashboard() {
         <KPICard title="Urgent Payments" value={String(urgentPayments.length)} subtitle="Due within 3 days" icon={<Clock className="h-5 w-5" />} variant="critical" />
         <KPICard title="Savings Available" value={formatINR(savingsAvailable)} subtitle="Live discount windows" icon={<TrendingDown className="h-5 w-5" />} variant="success" />
         <KPICard title="Missed Savings" value={formatINR(missedSavings)} subtitle="Expired discounts" icon={<AlertTriangle className="h-5 w-5" />} variant="warning" />
-        <KPICard title="Estimated Penalties" value={formatINR(totalPenalties)} subtitle="Overdue penalties" icon={<AlertTriangle className="h-5 w-5" />} variant="warning" />
+        <KPICard title="Estimated Penalties" value={formatINR(totalPenalties)} subtitle="Overdue penalties" icon={<Zap className="h-5 w-5" />} variant="warning" />
       </div>
 
       {/* AI Insights */}
