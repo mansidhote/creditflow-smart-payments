@@ -27,6 +27,7 @@ export default function Invoices() {
   const [tab, setTab] = useState('all');
   const [form, setForm] = useState({
     supplier_id: '', amount: '', terms: 'Net 30', custom_terms: '', invoice_date: new Date().toISOString().split('T')[0], notes: '',
+    penalty_rate: '', penalty_type: 'daily',
   });
 
   const fetchData = async () => {
@@ -61,6 +62,8 @@ export default function Invoices() {
       terms, invoice_date: form.invoice_date, due_date: dueDate.toISOString().split('T')[0],
       discount_deadline: discountDeadline, discount_pct: parsed.discountPct, discount_days: parsed.discountDays,
       notes: form.notes || null,
+      penalty_rate: form.penalty_rate ? parseFloat(form.penalty_rate) : 0,
+      penalty_type: form.penalty_type || 'daily',
     });
 
     if (error) { toast.error(error.message); return; }
@@ -86,7 +89,7 @@ export default function Invoices() {
 
     toast.success('Invoice created');
     setOpen(false);
-    setForm({ supplier_id: '', amount: '', terms: 'Net 30', custom_terms: '', invoice_date: new Date().toISOString().split('T')[0], notes: '' });
+    setForm({ supplier_id: '', amount: '', terms: 'Net 30', custom_terms: '', invoice_date: new Date().toISOString().split('T')[0], notes: '', penalty_rate: '', penalty_type: 'daily' });
     fetchData();
   };
 
@@ -94,12 +97,26 @@ export default function Invoices() {
     if (!user) return;
     const discountCaptured = invoice.discount_deadline && getDaysLeft(invoice.discount_deadline) > 0
       ? invoice.amount * (invoice.discount_pct || 0) / 100 : 0;
+    // calculate penalty if overdue
+    const daysLeft = getDaysLeft(invoice.due_date);
+    let penaltyAmount = 0;
+    if (daysLeft < 0 && (invoice.penalty_rate || 0) > 0) {
+      const overdue = Math.abs(daysLeft);
+      if (invoice.penalty_type === 'monthly') {
+        const months = Math.ceil(overdue / 30);
+        penaltyAmount = invoice.amount * (invoice.penalty_rate || 0) / 100 * months;
+      } else {
+        // daily
+        penaltyAmount = invoice.amount * (invoice.penalty_rate || 0) / 100 * overdue;
+      }
+    }
+    const totalPaid = invoice.amount - discountCaptured + penaltyAmount;
     await supabase.from('payments').insert({
       user_id: user.id, invoice_id: invoice.id,
-      amount_paid: invoice.amount - discountCaptured, discount_captured: discountCaptured,
+      amount_paid: totalPaid, discount_captured: discountCaptured,
     });
     await supabase.from('invoices').update({ status: 'PAID' as const }).eq('id', invoice.id);
-    toast.success(`Paid ${formatINR(invoice.amount - discountCaptured)}${discountCaptured > 0 ? ` (saved ${formatINR(discountCaptured)})` : ''}`);
+    toast.success(`Paid ${formatINR(Math.round(totalPaid))}${discountCaptured > 0 ? ` (saved ${formatINR(Math.round(discountCaptured))})` : ''}${penaltyAmount > 0 ? ` (including penalty ${formatINR(Math.round(penaltyAmount))})` : ''}`);
     fetchData();
   };
 
@@ -126,6 +143,20 @@ export default function Invoices() {
               <div className="space-y-2">
                 <Label>Amount (₹) *</Label>
                 <Input type="number" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} placeholder="50000" />
+              </div>
+              <div className="space-y-2">
+                <Label>Penalty rate (%)</Label>
+                <Input type="number" value={form.penalty_rate} onChange={e => setForm(f => ({ ...f, penalty_rate: e.target.value }))} placeholder="0" />
+              </div>
+              <div className="space-y-2">
+                <Label>Penalty type</Label>
+                <Select value={form.penalty_type} onValueChange={v => setForm(f => ({ ...f, penalty_type: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="daily">Daily</SelectItem>
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label>Credit Terms</Label>
@@ -178,6 +209,17 @@ export default function Invoices() {
             const days = getDaysLeft(inv.due_date);
             const eac = calcEAC(inv.discount_pct || 0, inv.discount_days || 0, parseCreditTerm(inv.terms).netDays);
             const discountDays = inv.discount_deadline ? getDaysLeft(inv.discount_deadline) : null;
+            // compute penalty for display
+            let penaltyDisplay = 0;
+            if (days < 0 && (inv.penalty_rate || 0) > 0) {
+              const overdue = Math.abs(days);
+              if (inv.penalty_type === 'monthly') {
+                const months = Math.ceil(overdue / 30);
+                penaltyDisplay = inv.amount * (inv.penalty_rate || 0) / 100 * months;
+              } else {
+                penaltyDisplay = inv.amount * (inv.penalty_rate || 0) / 100 * overdue;
+              }
+            }
             return (
               <div key={inv.id} className="bg-card border border-border rounded-lg p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -198,6 +240,9 @@ export default function Invoices() {
                       {eac !== null && (
                         <span className="text-primary font-mono">EAC: {eac.toFixed(1)}%</span>
                       )}
+                        {penaltyDisplay > 0 && (
+                          <span className="text-amber-600">Penalty: {formatINR(Math.round(penaltyDisplay))} ({inv.penalty_rate}%/{inv.penalty_type})</span>
+                        )}
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
