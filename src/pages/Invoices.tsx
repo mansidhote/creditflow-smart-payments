@@ -226,6 +226,9 @@ export default function Invoices() {
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <p className="font-medium">{inv.suppliers?.name}</p>
+                      {penaltyDisplay > 0 && (
+                        <span className="text-amber-700 bg-amber-50 px-2 py-0.5 rounded text-xs font-medium">Penalty</span>
+                      )}
                       <StatusBadge status={inv.status} />
                     </div>
                     <p className="text-2xl font-mono font-bold">{formatINR(inv.amount)}</p>
