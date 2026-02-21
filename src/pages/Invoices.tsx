@@ -120,7 +120,7 @@ export default function Invoices() {
     fetchData();
   };
 
-  const filtered = tab === 'all' ? invoices : tab === 'paid' ? invoices.filter(i => i.status === 'PAID') : tab === 'active' ? invoices.filter(i => i.status === 'ACTIVE') : tab === 'due_soon' ? invoices.filter(i => { const daysLeftVal = getDaysLeft(i.due_date); return daysLeftVal >= 0 && daysLeftVal <= 3; }) : tab === 'overdue' ? invoices.filter(i => getDaysLeft(i.due_date) < 0) : invoices;
+  const filtered = tab === 'all' ? invoices : tab === 'paid' ? invoices.filter(i => i.status === 'PAID') : tab === 'active' ? invoices.filter(i => i.status === 'ACTIVE') : tab === 'due_soon' ? invoices.filter(i => { const daysLeftVal = getDaysLeft(i.due_date); return i.status !== 'PAID' && daysLeftVal >= 0 && daysLeftVal <= 3; }) : tab === 'overdue' ? invoices.filter(i => i.status !== 'PAID' && getDaysLeft(i.due_date) < 0) : invoices;
 
   if (loading) return <div className="space-y-4"><Skeleton className="h-8 w-48" /><Skeleton className="h-64" /></div>;
 
