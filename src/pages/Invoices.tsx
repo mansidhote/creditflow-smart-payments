@@ -120,7 +120,7 @@ export default function Invoices() {
     fetchData();
   };
 
-  const filtered = tab === 'all' ? invoices : invoices.filter(i => i.status === tab.toUpperCase());
+  const filtered = tab === 'all' ? invoices : tab === 'paid' ? invoices.filter(i => i.status === 'PAID') : tab === 'active' ? invoices.filter(i => i.status === 'ACTIVE') : tab === 'due_soon' ? invoices.filter(i => { const daysLeftVal = getDaysLeft(i.due_date); return daysLeftVal >= 0 && daysLeftVal <= 3; }) : tab === 'overdue' ? invoices.filter(i => getDaysLeft(i.due_date) < 0) : invoices;
 
   if (loading) return <div className="space-y-4"><Skeleton className="h-8 w-48" /><Skeleton className="h-64" /></div>;
 
@@ -235,11 +235,14 @@ export default function Invoices() {
                     <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
                       <span className="bg-muted px-2 py-0.5 rounded font-mono">{inv.terms}</span>
                       <span>Due: {new Date(inv.due_date).toLocaleDateString('en-IN')}</span>
-                      {inv.discount_deadline && discountDays !== null && (
-                        <span className={discountDays > 0 ? 'text-success' : 'text-critical'}>
-                          Discount: {discountDays > 0 ? `${discountDays}d left` : 'Expired'}
-                        </span>
-                      )}
+                      {inv.discount_deadline && discountDays !== null && (() => {
+                        const discountAmount = inv.amount * (inv.discount_pct || 0) / 100;
+                        return (
+                          <span className={discountDays > 0 ? 'text-success' : 'text-critical'}>
+                            Discount: {formatINR(Math.round(discountAmount))} ({inv.discount_pct}%) {discountDays > 0 ? `${discountDays}d left` : 'Expired'}
+                          </span>
+                        );
+                      })()}
                       {eac !== null && (
                         <span className="text-primary font-mono">EAC: {eac.toFixed(1)}%</span>
                       )}
