@@ -117,8 +117,8 @@ export default function Dashboard() {
       getDaysLeft(i.discount_deadline) <= 3,
   );
 
-  const markAsPaid = async (invoice: Invoice) => {
-    if (!user) return;
+const markAsPaid = async (invoice: Invoice) => {
+    if (!user || !profile) return;
 
     const discountCaptured =
       invoice.discount_deadline && getDaysLeft(invoice.discount_deadline) > 0
@@ -137,6 +137,11 @@ export default function Dashboard() {
       }
     }
     const amountPaid = invoice.amount - discountCaptured + penaltyAmount;
+
+    if (profile.cash_balance < amountPaid) {
+      toast.error(`Insufficient balance. You have ${formatINR(profile.cash_balance)} but need ${formatINR(amountPaid)}.`);
+      return;
+    }
 
     // ← Replace your old insert with this
     const { data: paymentData, error } = await supabase
@@ -161,6 +166,12 @@ export default function Dashboard() {
       .from("invoices")
       .update({ status: "PAID" as const })
       .eq("id", invoice.id);
+    
+    const newBalance = profile.cash_balance - amountPaid;
+    await supabase.from('profiles').update({ cash_balance: newBalance }).eq('user_id', user.id);
+
+    await refreshProfile();
+    await fetchInvoices();
 
     toast.success(
       `Payment recorded: ${formatINR(Math.round(amountPaid))}${
