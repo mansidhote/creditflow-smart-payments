@@ -1,0 +1,4 @@
+project_id = "ukywuipwlpogkxstmvty"
+
+[functions.optimize-payments]
+verify_jwt = false
