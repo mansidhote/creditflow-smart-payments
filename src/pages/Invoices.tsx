@@ -196,6 +196,11 @@ export default function Invoices() {
     }
     const totalPaid = invoice.amount - discountCaptured + penaltyAmount;
 
+    if (profile.cash_balance < totalPaid) {
+      toast.error(`Insufficient balance. You have ${formatINR(profile.cash_balance)} but need ${formatINR(totalPaid)}.`);
+      return;
+    }
+
     const { error: paymentError } = await supabase.from("payments").insert({
       user_id: user.id,
       invoice_id: invoice.id,
@@ -212,6 +217,7 @@ export default function Invoices() {
       .from("invoices")
       .update({ status: "PAID" as const })
       .eq("id", invoice.id);
+
     await supabase
       .from("profiles")
       .update({
@@ -323,20 +329,6 @@ export default function Invoices() {
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="daily">Daily</SelectItem>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Penalty rate (%)</Label>
-                <Input type="number" value={form.penalty_rate} onChange={e => setForm(f => ({ ...f, penalty_rate: e.target.value }))} placeholder="0" />
-              </div>
-              <div className="space-y-2">
-                <Label>Penalty type</Label>
-                <Select value={form.penalty_type} onValueChange={v => setForm(f => ({ ...f, penalty_type: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="daily">Daily</SelectItem>
                     <SelectItem value="monthly">Monthly</SelectItem>
